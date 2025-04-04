@@ -10,7 +10,6 @@ import {LiquidityAmounts} from "v4-core/test/utils/LiquidityAmounts.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
-import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 
 // Interface for PositionManager
 interface IPositionManager {
@@ -40,7 +39,6 @@ interface IAllowanceTransfer {
 contract AddLiquidityToPool is Script {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
-    using StateLibrary for IPoolManager;
 
     // Base Sepolia PoolManager address
     address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
@@ -51,37 +49,32 @@ contract AddLiquidityToPool is Script {
     address constant WETH = 0x4200000000000000000000000000000000000006;
     address constant USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
     
-    // Pool configuration
-    uint24 lpFee = 3000; // 0.30% base fee
+    // Pool configuration - Using 0.05% fee
+    uint24 lpFee = 500;
     int24 tickSpacing = 60;
     
     // Configuration for liquidity
-    uint256 public token0Amount = 0.001e18; // Small amount for testing
-    uint256 public token1Amount = 0.001e18; // Small amount for testing
+    uint256 public token0Amount = 0.001e18;
+    uint256 public token1Amount = 0.001e18;
     
-    // Range of the position (full range)
-    int24 tickLower = -60; // Must be a multiple of tickSpacing
+    // Range of the position
+    int24 tickLower = -60;
     int24 tickUpper = 60;
     
-    // Your hook address
-    address hookAddress;
-    
-    // Interface for contracts
-    IPoolManager poolManager = IPoolManager(POOL_MANAGER);
-    IPositionManager posm;
-    
-    // Currencies and tokens
-    Currency currency0;
-    Currency currency1;
-    IERC20 token0;
-    IERC20 token1;
-
-    function setUp() public {
-        // Load your deployed hook address from environment
-        hookAddress = vm.envAddress("HOOK_ADDRESS");
-        posm = IPositionManager(POSITION_MANAGER);
+    function run() public {
+        // Load hook address from environment
+        address hookAddress = vm.envAddress("HOOK_ADDRESS");
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
         
-        // Set up currencies - ensure they're sorted
+        // Start broadcasting transactions
+        vm.startBroadcast(privateKey);
+        
+        // Set up currencies
+        Currency currency0;
+        Currency currency1;
+        IERC20 token0;
+        IERC20 token1;
+        
         if (uint160(USDC) < uint160(WETH)) {
             currency0 = Currency.wrap(USDC);
             currency1 = Currency.wrap(WETH);
@@ -93,16 +86,8 @@ contract AddLiquidityToPool is Script {
             token0 = IERC20(WETH);
             token1 = IERC20(USDC);
         }
-    }
-
-    function run() public {
-        // Get private key from environment variable
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
         
-        // Start broadcasting transactions
-        vm.startBroadcast(privateKey);
-        
-        // Create pool key with your hook
+        // Create pool key
         PoolKey memory pool = PoolKey({
             currency0: currency0,
             currency1: currency1,
@@ -111,8 +96,8 @@ contract AddLiquidityToPool is Script {
             hooks: IHooks(hookAddress)
         });
         
-        // Use a default sqrtPriceX96 value for Base Sepolia
-        uint160 sqrtPriceX96 = 79228162514264337593543950336; // 1.0 in sqrtPriceX96 format
+        // Default sqrtPriceX96 (1.0)
+        uint160 sqrtPriceX96 = 79228162514264337593543950336;
         
         // Calculate liquidity from token amounts
         uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
@@ -126,10 +111,11 @@ contract AddLiquidityToPool is Script {
         // Approve tokens for Position Manager
         token0.approve(address(PERMIT2), type(uint256).max);
         token1.approve(address(PERMIT2), type(uint256).max);
-        IAllowanceTransfer(PERMIT2).approve(address(token0), address(posm), type(uint160).max, type(uint48).max);
-        IAllowanceTransfer(PERMIT2).approve(address(token1), address(posm), type(uint160).max, type(uint48).max);
+        IAllowanceTransfer(PERMIT2).approve(address(token0), address(POSITION_MANAGER), type(uint160).max, type(uint48).max);
+        IAllowanceTransfer(PERMIT2).approve(address(token1), address(POSITION_MANAGER), type(uint160).max, type(uint48).max);
         
         // Add liquidity using Position Manager
+        IPositionManager posm = IPositionManager(POSITION_MANAGER);
         uint256 tokenId = posm.mint(
             pool,
             tickLower,
@@ -142,9 +128,10 @@ contract AddLiquidityToPool is Script {
             ""  // hook data
         );
         
-        console.log("Liquidity added to pool with DynamicFeeHook on Base Sepolia");
+        console.log("Liquidity added successfully to pool with DynamicFeeHook on Base Sepolia");
         console.log("Position NFT ID:", tokenId);
         console.log("Liquidity amount:", liquidity);
+        console.log("Fee tier:", lpFee);
         console.log("Currency0:", Currency.unwrap(currency0));
         console.log("Currency1:", Currency.unwrap(currency1));
         
